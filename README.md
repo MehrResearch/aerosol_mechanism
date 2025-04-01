@@ -1,0 +1,1 @@
+Experiment code in MicroPython (targetting the AeroBoard via the CtrlAer library) for experiments descibed in _Accelerated investigation of complex reaction cascades via digital aerosol chemistry coupled to online mass spectrometry_ by Zehua Li and S. Hessam M. Mehr.
