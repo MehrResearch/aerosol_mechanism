@@ -160,23 +160,36 @@ def _(np, pd):
 
 @app.cell(hide_code=True)
 def _(mo):
-    picker = mo.ui.dropdown({'Low source voltage': 'low_frag', 'Typical source voltage': 'standard', 'High source voltage': 'high_frag'}, value='Typical source voltage')
+    picker = mo.ui.dropdown({'Low source voltage (20 V)': 'low_frag', 'Typical source voltage (20–50 V)': 'standard', 'High source voltage (40–60 V)': 'high_frag'}, value='Typical source voltage (20–50 V)')
     show_macrocycle = mo.ui.checkbox(value=True, label='Pre-formed macrocycle')
     show_reaction  = mo.ui.checkbox(value=True, label='Aerosol reaction mixture')
     layout = mo.ui.radio(['Superimposed', 'Stacked'], value='Superimposed', label='Layout', inline=True)
-    legend_loc = mo.ui.radio(
-        {'Top left': 'upper left', 'Top middle': 'upper center', 'Top right': 'upper right'},
-        value='Top middle', label='Legend', inline=True,
+    header_loc = mo.ui.radio(
+        {'Left': 'left', 'Center': 'center', 'Right': 'right'},
+        value='Center', label='Header position', inline=True,
     )
-    mo.hstack([picker, show_macrocycle, show_reaction, layout, legend_loc], justify='start')
-    return layout, legend_loc, picker, show_macrocycle, show_reaction
+    intensity_mode = mo.ui.radio(['Relative', 'Absolute'], value='Relative', label='Intensity', inline=True)
+
+    mo.vstack([
+        mo.hstack([picker, show_macrocycle, show_reaction], justify='start'),
+        mo.hstack([layout, intensity_mode, header_loc], justify='start'),
+    ])
+    return (
+        header_loc,
+        intensity_mode,
+        layout,
+        picker,
+        show_macrocycle,
+        show_reaction,
+    )
 
 
 @app.cell(hide_code=True)
 def _(
     data_root,
+    header_loc,
+    intensity_mode,
     layout,
-    legend_loc,
     mo,
     np,
     out_dir,
@@ -189,6 +202,7 @@ def _(
     window,
 ):
     from scipy.signal import find_peaks
+    from matplotlib.ticker import ScalarFormatter
 
     full_macrocycle = read_spec(data_root / f'full_spectrum_macrocycle_{picker.value}.csv')
     full_reaction   = read_spec(data_root / f'full_spectrum_reaction_{picker.value}.csv')
@@ -198,9 +212,11 @@ def _(
     for _df in (full_macrocycle, full_reaction):
         _df.loc[_df['mz'].between(620, 625), 'intensity'] = 0.0
 
+    _relative = intensity_mode.value == 'Relative'
+
     _traces = [
-        (show_macrocycle.value, 'Pre-formed macrocycle',    full_macrocycle, 'C0', 1.0),
-        (show_reaction.value,  'Aerosol reaction mixture', full_reaction,   'C3', 0.8),
+        (show_macrocycle.value, f'Pre-formed macrocycle — {picker.selected_key}',    full_macrocycle, 'C0', 1.0),
+        (show_reaction.value,   f'Aerosol reaction mixture — {picker.selected_key}', full_reaction,   'C3', 0.8),
     ]
     _active = [t for t in _traces if t[0]]
 
@@ -213,22 +229,35 @@ def _(
         _axes = [_ax] * len(_active)
 
     _min_sep_mz = 10.0  # minimum peak separation in m/z
+    # (peak labels in absolute mode use scientific notation, formatted inline)
+
+    # Track ymax in absolute mode so we can give the labels headroom afterwards.
+    _abs_ymax = {id(a): 0.0 for a in _axes}
 
     for _ax_i, (_visible, _label, _df, _color, _alpha) in zip(_axes, _active):
         _mz = _df['mz'].to_numpy()
-        _y = smooth(_df['intensity'] / _df['intensity'].max(), window.value)
-        _ax_i.plot(_mz, _y, color=_color, alpha=_alpha, label=_label)
+        _raw = _df['intensity'].to_numpy(dtype=float)
+        _norm = _raw / _raw.max() if _raw.max() else _raw
+        # Plotted signal depends on mode; peak detection always uses the
+        # max-normalized signal so the 0.09 threshold is interpretable in both.
+        _y_plot = smooth(_norm if _relative else _raw, window.value)
+        _y_pick = smooth(_norm, window.value)
+        _ax_i.plot(_mz, _y_plot, color=_color, alpha=_alpha, label=_label)
         if _stacked:
-            _ax_i.set_title(_label, loc='center')
+            _ax_i.set_title(_label, loc=header_loc.value)
 
         _step = float(np.median(np.diff(_mz)))
         _distance = max(1, int(round(_min_sep_mz / _step)))
-        _peaks, _ = find_peaks(_y, height=0.09, distance=_distance)
+        _peaks, _ = find_peaks(_y_pick, height=0.09, distance=_distance)
 
         for _i in _peaks:
+            if _relative:
+                _text = f'{_mz[_i]:.1f} ({round(100 * _y_pick[_i])}%)'
+            else:
+                _text = f'{_mz[_i]:.1f} ({_y_plot[_i]:.1e})'
             _ax_i.annotate(
-                f'{_mz[_i]:.1f} ({round(100 * _y[_i])}%)',
-                xy=(_mz[_i], _y[_i]),
+                _text,
+                xy=(_mz[_i], _y_plot[_i]),
                 xytext=(0, 3),
                 textcoords='offset points',
                 rotation=90, rotation_mode='anchor',
@@ -237,6 +266,8 @@ def _(
                 annotation_clip=False,
             )
 
+        _abs_ymax[id(_ax_i)] = max(_abs_ymax[id(_ax_i)], float(_y_plot.max()))
+
     # Apply identical cosmetics to every axes used (deduplicated).
     _axes_seen = []
     for a in _axes:
@@ -244,20 +275,28 @@ def _(
             _axes_seen.append(a)
 
     for _a in _axes_seen:
-        _a.set_ylabel('Normalized intensity')
-        _a.set_ylim(0, 1.0)
-        _a.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
+        if _relative:
+            _a.set_ylabel('Normalized intensity')
+            _a.set_ylim(0, 1.0)
+            _a.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
+        else:
+            _a.set_ylabel('Intensity')
+            _a.set_ylim(0, _abs_ymax[id(_a)] * 1.02)
+            _sf = ScalarFormatter(useMathText=True)
+            _sf.set_scientific(True)
+            _sf.set_powerlimits((0, 0))  # always use scientific notation
+            _a.yaxis.set_major_formatter(_sf)
         _a.spines['top'].set_visible(False)
         _a.spines['right'].set_visible(False)
         if not _stacked:
             # Anchor the legend just above the axes (y > 1) so it lives in the
             # extra space we reserved with subplots_adjust(top=...).
             _anchors = {
-                'upper left':   ((0.0, 1.02), 'lower left'),
-                'upper center': ((0.5, 1.02), 'lower center'),
-                'upper right':  ((1.0, 1.02), 'lower right'),
+                'left':   ((0.0, 1.02), 'lower left'),
+                'center': ((0.5, 1.02), 'lower center'),
+                'right':  ((1.0, 1.02), 'lower right'),
             }
-            _bbox, _legloc = _anchors[legend_loc.value]
+            _bbox, _legloc = _anchors[header_loc.value]
             _a.legend(frameon=False, loc=_legloc,
                       bbox_to_anchor=_bbox, bbox_transform=_a.transAxes)
     _axes_seen[-1].set_xlabel('m/z')
@@ -268,8 +307,10 @@ def _(
     else:
         _fig.subplots_adjust(top=0.72)
 
-    _fig.savefig(out_dir / f'Full spectrum_{picker.value}.svg', transparent=True, bbox_inches='tight')
-    _fig.savefig(out_dir / f'Full spectrum_{picker.value}.png', transparent=True, bbox_inches='tight', dpi=300)
+    _mode_tag = 'relative' if _relative else 'absolute'
+    _layout_tag = 'stacked' if _stacked else 'overlapped'
+    _fig.savefig(out_dir / f'Full spectrum_{picker.value}_{_layout_tag}_{_mode_tag}.svg', transparent=True, bbox_inches='tight')
+    _fig.savefig(out_dir / f'Full spectrum_{picker.value}_{_layout_tag}_{_mode_tag}.png', transparent=True, bbox_inches='tight', dpi=300)
     mo.mpl.interactive(_fig)
     return
 
