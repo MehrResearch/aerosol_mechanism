@@ -1,2 +1,6 @@
+macrocycle_data.zip
+.ipynb_checkpoints
+out/
+data/
 .DS_Store
 __marimo__
