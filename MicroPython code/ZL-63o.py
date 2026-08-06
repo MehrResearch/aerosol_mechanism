@@ -1,0 +1,33 @@
+from pico_ctrlaer import ON, OFF, mux, CtrlAer
+from machine import ADC, Pin
+from time import sleep
+
+cycle_delay = 180
+reaction_delays = [5, 10, 15, 20]
+off_time = 1000
+
+ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=3,freq=115_500)
+
+air_control = Pin(16, Pin.OUT)
+#out_control = Pin(?, Pin.OUT)
+air_control.value(0)
+sleep(2)
+
+def prog():
+    for reaction_delay in reaction_delays:
+        for repeats in range(3):
+            for cmd in [0b001,  0b100,  0b101]:
+                for j in range(10):
+                    print(f'{j}: amine: {cmd % 2} aldehyde: {cmd // 2}')
+                    yield cmd, 50
+                    yield OFF, off_time
+                ctrlaer.block()
+                sleep(reaction_delay)
+                air_control.value(1)
+                sleep(cycle_delay)
+                air_control.value(0)
+            
+# GP14:  aldehyde
+# GP13:  amine
+ctrlaer.run(prog())
+air_control.value(1)

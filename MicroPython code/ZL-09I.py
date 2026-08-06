@@ -2,36 +2,31 @@ from pico_ctrlaer import ON, OFF, mux, CtrlAer
 from machine import ADC, Pin
 from time import sleep
 
-N = 2
-n = 10
+N = 10
+n = 50
 reaction_delay = 15
-cycle_delay = 180
+cycle_delay = 120
 off_time = 250
 
-ctrlaer = CtrlAer(sm_number=0, base_pin=8, n_pins=3,freq=114_500)
+ctrlaer = CtrlAer(sm_number=0, base_pin=13, n_pins=2,freq=113_500)
 
-air_control = Pin(16, Pin.OUT)
+air_control = Pin(0, Pin.OUT)
 air_control.value(0)
-print("value_off")
 sleep(2)
 
 def prog():
     for i in range(N):
-        for cmd in [0b001, 0b100, 0b101]:
+        for cmd in [0b01, 0b10, 0b11]:
             for j in range(n):
-                print(f'{j}:  TFB: {cmd % 2} pamine: {cmd // 2}')
+                print(f'{j}: amine: {cmd % 2} aldehyde: {cmd // 2}')
                 yield cmd, 50
                 yield OFF, off_time
             ctrlaer.block()
             sleep(reaction_delay)
-            print("reaction_delay")
             air_control.value(1)
-            print("value_on")
             sleep(cycle_delay)
-            print("cycle_delay")
             air_control.value(0)
-            print("value_off")
-# MS Heater off           
-# GP08:  TFB
-# GP10:  pamine
+            
+# GP14:  aldehyde
+# GP13:  amine
 ctrlaer.run(prog())

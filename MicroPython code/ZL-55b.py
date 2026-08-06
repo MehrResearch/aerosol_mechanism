@@ -1,10 +1,12 @@
-from ctrlaer import ON, OFF, mux, CtrlAer
-from machine import Pin
+from pico_ctrlaer import ON, OFF, mux, CtrlAer
+from machine import ADC, Pin
 from time import sleep
 
 n = 10
 reaction_delay = 5
 cycle_delay = 120
+#reaction_delay = 1
+#cycle_delay = 5
 off_time = 200
 on_time = 100
 
